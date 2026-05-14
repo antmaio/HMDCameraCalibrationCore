@@ -1,0 +1,21 @@
+# Models
+*.pt
+*.onnx
+
+# Data, texts and images
+*.txt
+*.png
+
+# Folders
+/frames/
+/screenshot_for_report/
+/snapshot/
+/calibration_results/
+
+# Editor & Python cache
+.vscode/
+__pycache__/
+
+# Unused and deprecated scripts (escaping brackets)
+\[UNUSED\]_*.py
+\[DEPRECATED\]_*.py
