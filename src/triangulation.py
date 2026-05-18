@@ -41,7 +41,7 @@ def triangulate_multiview_mock(
 # Real DLT-based triangulation (N views)
 # ---------------------------------------------------------------------------
 
-def _build_projection_matrix(K: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
+def build_projection_matrix(K: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
     Compute the 3×4 camera projection matrix P = K @ [R | t].
 
@@ -134,5 +134,5 @@ def build_projection_matrices(
         ], dtype=np.float64)
         R = np.array(extr["R"], dtype=np.float64)
         t = np.array(extr["t"], dtype=np.float64)
-        proj_matrices.append(_build_projection_matrix(K, R, t))
+        proj_matrices.append(build_projection_matrix(K, R, t))
     return proj_matrices

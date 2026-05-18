@@ -212,6 +212,11 @@ def main() -> None:
     parser.add_argument("--osc-port", default=9000, type=int, help="UDP port for OSC HMD pose (default: 9000)")
     args = parser.parse_args()
 
+    # Require a calibration mode when projecting HMD calibration or motion to world
+    if (args.show_hmd_calibration or args.show_hmd_motion) and args.mode is None:
+        print("[ERROR] --mode is required when using --show_hmd_calibration or --show_hmd_motion. Use --mode barycenter or --mode anchors.")
+        sys.exit(1)
+
     if args.show_hmd_motion:
         start_osc_server(args.osc_ip, args.osc_port)
 

@@ -1,27 +1,22 @@
+"""calibration_to_world.py
+Perform ZED camera calibration to a shared checkerboard world origin and save extrinsics.
+"""
+
 # External
 import pyzed.sl as sl
 import cv2 
 import numpy as np
 import os
 import argparse
-import json
 from concurrent.futures import ThreadPoolExecutor
 
 # Internal
 import config
 from src.camera import init_cameras, grab_frames, close_cameras
-
-def generate_3d_checkerboard_points(board_size, square_size):
-    """
-    Generate 3D coordinates of the checkerboard inner corners (Z=0).
-    This establishes the World Coordinate System origin at the first inner corner.
-    """
-    objp = np.zeros((board_size[0] * board_size[1], 3), dtype=np.float32)
-    objp[:, :2] = np.mgrid[0:board_size[0], 0:board_size[1]].T.reshape(-1, 2)
-    objp *= square_size
-    return objp
+from utils import compute_camera_pose_in_world, ensure_dir, generate_3d_checkerboard_points, save_json
 
 def main():
+    """Perform ZED camera extrinsic calibration and save world and camera poses."""
     parser = argparse.ArgumentParser(description="ZED Camera Calibration to Common World Origin")
     parser.add_argument("--display", action='store_true', help="Display intermediate calibration images, useful for debug")
     parser.add_argument("--out_dir", type=str, default="calibration_results", help="Directory to save calibration results")
@@ -128,9 +123,7 @@ def main():
                 }
                 
                 # 2. Camera Pose in World Frame (Physical location relative to the mat)
-                R_world = R.T
-                t_world = -R_world @ tvec
-                
+                R_world, t_world = compute_camera_pose_in_world(R, tvec)
                 cam_in_world_results[f"camera_{serial}"] = {
                     "R": R_world.tolist(),
                     "t": t_world.tolist()
@@ -139,16 +132,13 @@ def main():
         # -------------------------------------------------------------------
         # 8. Save results and print summary
         # -------------------------------------------------------------------
-        os.makedirs(args.out_dir, exist_ok=True)
+        ensure_dir(args.out_dir)
         
         save_path_ext = os.path.join(args.out_dir, "world_to_camera_extrinsics.json")
         save_path_pose = os.path.join(args.out_dir, "camera_poses_in_world.json")
-        
-        with open(save_path_ext, "w") as f:
-            json.dump(world_to_cam_results, f, indent=4)
-            
-        with open(save_path_pose, "w") as f:
-            json.dump(cam_in_world_results, f, indent=4)
+
+        save_json(save_path_ext, world_to_cam_results)
+        save_json(save_path_pose, cam_in_world_results)
 
         print('\n[INFO] ---- Calibration Results (Common World Origin) ----')
         for serial in config.CAMERA_SERIAL_NUMBERS:

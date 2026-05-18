@@ -1,48 +1,20 @@
+"""hmd_calibration_to_world.py
+Estimate HMD and XR camera poses in world coordinates from a saved snapshot and metadata.
+"""
+
 import cv2
 import numpy as np
 import os
 import argparse
-import json
-import glob
 import sys
-from scipy.spatial.transform import Rotation as R
 
 # Internal
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
-
-def generate_3d_checkerboard_points(board_size, square_size):
-    """
-    Generate 3D coordinates of the checkerboard inner corners (Z=0).
-    This establishes the World Coordinate System origin at the first inner corner.
-    """
-    objp = np.zeros((board_size[0] * board_size[1], 3), dtype=np.float32)
-    objp[:, :2] = np.mgrid[0:board_size[0], 0:board_size[1]].T.reshape(-1, 2)
-    objp *= square_size
-    return objp
-
-def get_snapshot_files(snapshot_dir):
-    png_files = glob.glob(os.path.join(snapshot_dir, "Snapshot_*.png"))
-    if not png_files:
-        raise FileNotFoundError(f"No Snapshot_*.png found in {snapshot_dir}")
-    # Use the most recent snapshot based on file name or modification time
-    img_path = sorted(png_files)[-1]
-    base_name = os.path.splitext(os.path.basename(img_path))[0]
-    json_path = os.path.join(snapshot_dir, f"{base_name}.json")
-    if not os.path.exists(json_path):
-        raise FileNotFoundError(f"Missing JSON file {json_path} for {img_path}")
-    return img_path, json_path
-
-def unity_to_cv(pos_dict, rot_dict):
-    pos = np.array([pos_dict["x"], pos_dict["y"], pos_dict["z"]])
-    rot_q = [rot_dict["x"], rot_dict["y"], rot_dict["z"], rot_dict["w"]]
-    pos_cv = np.array([pos[0], -pos[1], pos[2]])
-    R_u = R.from_quat(rot_q).as_matrix()
-    M = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 1]])
-    R_cv = M @ R_u @ M
-    return pos_cv, R_cv
+from utils import compute_camera_pose_in_world, generate_3d_checkerboard_points, get_snapshot_files, load_json, save_json, ensure_dir, unity_to_cv
 
 def main():
+    """Run HMD calibration from a snapshot image and save world pose data for the requested mode."""
     parser = argparse.ArgumentParser(description="HMD Camera Calibration to Common World Origin")
     parser.add_argument("--mode", type=str, choices=["barycenter", "anchors", "both"], required=True, help="Calibration mode: barycenter, anchors, or both")
     parser.add_argument("--display", action='store_true', help="Display calibration images")
@@ -61,8 +33,7 @@ def main():
     print(f"[INFO] Using intrinsics: {json_path}")
 
     # 2. Parse intrinsics properly 
-    with open(json_path, 'r') as f:
-        meta = json.load(f)
+    meta = load_json(json_path)
     
     fx = meta["focalLength"]["x"]
     fy = meta["focalLength"]["y"]
@@ -115,9 +86,7 @@ def main():
                 "t": tvec.tolist()
             }
 
-            R_world_left_cam = R_left_cam.T
-            t_world_left_cam = -R_world_left_cam @ tvec
-            
+            R_world_left_cam, t_world_left_cam = compute_camera_pose_in_world(R_left_cam, tvec)
             left_cam_in_world = {
                 "R": R_world_left_cam.tolist(),
                 "t": t_world_left_cam.tolist()
@@ -186,24 +155,22 @@ def main():
                 }
 
                 target_out_dir = os.path.join(args.out_dir, target_mode)
-                os.makedirs(target_out_dir, exist_ok=True)
+                ensure_dir(target_out_dir)
                 
                 save_path_ext = os.path.join(target_out_dir, "world_to_hmd_extrinsics.json")
                 save_path_pose = os.path.join(target_out_dir, "hmd_poses_in_world.json")
                 
-                with open(save_path_ext, "w") as f:
-                    json.dump({
-                        "hmd": world_to_head, 
-                        "left_eye": world_to_left_cam,
-                        "xr_camera": world_to_xr
-                    }, f, indent=4)
-                    
-                with open(save_path_pose, "w") as f:
-                    json.dump({
-                        "hmd": head_in_world, 
-                        "left_eye": left_cam_in_world,
-                        "xr_camera": xr_in_world
-                    }, f, indent=4)
+                save_json(save_path_ext, {
+                    "hmd": world_to_head, 
+                    "left_eye": world_to_left_cam,
+                    "xr_camera": world_to_xr
+                })
+                
+                save_json(save_path_pose, {
+                    "hmd": head_in_world, 
+                    "left_eye": left_cam_in_world,
+                    "xr_camera": xr_in_world
+                })
 
                 print(f'\n[INFO] ---- HMD Calibration Results (Common World Origin) - Mode: {target_mode.upper()} ----')
                 print("Physical Head Pose in World Frame:")

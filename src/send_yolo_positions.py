@@ -21,41 +21,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 from pose import load_model, estimate_poses
 from camera import init_cameras, grab_frames, close_cameras
-from triangulation import triangulate_multiview, _build_projection_matrix, _dlt_triangulate_point
+from triangulation import triangulate_multiview, build_projection_matrix, _dlt_triangulate_point
 from osc_sender import OscSenderSleepBasedRateLimiter
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Coordinate System Conversion Helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
-def quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
-    """Convert quaternion [x y z w] to a 3x3 rotation matrix."""
-    x, y, z, w = q / np.linalg.norm(q)
-    return np.array([
-        [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
-        [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
-        [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)],
-    ], dtype=np.float32)
-
-def unity_to_cv(pos, rot_q):
-    """
-    Map Unity's tracking coordinate space (LH: x-rt, y-up, z-fwd) 
-    to OpenCV coordinate space (RH: x-rt, y-dn, z-fwd).
-    """
-    pos_cv = np.array([pos[0], -pos[1], pos[2]], dtype=np.float32)
-    R_u = quaternion_to_rotation_matrix(rot_q)
-    M = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=np.float32)
-    R_cv = M @ R_u @ M
-    return pos_cv, R_cv
-
-def cv_to_unity(pos_cv: np.ndarray) -> np.ndarray:
-    """Convert from OpenCV coordinates to Unity coordinates."""
-    if len(pos_cv.shape) == 1:
-        return np.array([pos_cv[0], -pos_cv[1], pos_cv[2]], dtype=np.float32)
-    else:
-        res = pos_cv.copy()
-        res[:, 1] = -res[:, 1]
-        return res
+from utils import build_intrinsics_from_zed, cv_to_unity, load_latest_snapshot_json, unity_to_cv
 
 def get_world_to_unity_transform(mode: str):
     """Calculates transforming OpenCV World to Unity coordinates from calibration files."""
@@ -78,20 +46,29 @@ def get_world_to_unity_transform(mode: str):
     
     # Load snapshot to get Unity pose at calibration
     snapshot_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'snapshot'))
-    json_files = glob.glob(os.path.join(snapshot_dir, "Snapshot_*.json"))
-    if not json_files:
-        print("[ERROR] No Snapshot json found.")
-        sys.exit(1)
-        
-    latest_snapshot = sorted(json_files)[-1]
-    with open(latest_snapshot, 'r') as f:
-        snap = json.load(f)
-        
-    pos = snap["xrCamera_position"]
-    rot = snap["xrCamera_rotation"]
+    snap = load_latest_snapshot_json(snapshot_dir)
+
+    space_map = {
+        "barycenter": "guardianSpace",
+        "anchors": "anchorSpace"
+    }
+    space_key = space_map.get(mode, "trackingSpace")
+    space_data = snap.get(space_key, snap.get("trackingSpace", snap))
+
+    pos = space_data.get("xrCamera_position")
+    rot = space_data.get("xrCamera_rotation")
+    if pos is None or rot is None:
+        if "xrCamera_position" in snap and "xrCamera_rotation" in snap:
+            pos = snap["xrCamera_position"]
+            rot = snap["xrCamera_rotation"]
+        else:
+            available = ", ".join(space_data.keys())
+            print(f"[ERROR] Snapshot JSON does not contain xrCamera_position/xrCamera_rotation in '{space_key}'. Available keys: {available}")
+            sys.exit(1)
+
     pos_xr_unity = np.array([pos["x"], pos["y"], pos["z"]])
     rot_xr_unity_q = np.array([rot["x"], rot["y"], rot["z"], rot["w"]])
-    
+
     pos_xr_cv, R_xr_cv = unity_to_cv(pos_xr_unity, rot_xr_unity_q)
     
     R_c2w = R_xr_world @ R_xr_cv.T
@@ -111,9 +88,7 @@ def get_projection_matrices(cameras: list) -> list:
     proj_matrices = []
     for cam, sn in zip(cameras, config.CAMERA_SERIAL_NUMBERS):
         cam_info = cam.get_camera_information().camera_configuration.calibration_parameters.left_cam
-        K = np.array([[cam_info.fx, 0, cam_info.cx],
-                      [0, cam_info.fy, cam_info.cy],
-                      [0, 0, 1]], dtype=np.float32)
+        K = build_intrinsics_from_zed(cam_info).astype(np.float32)
         
         cam_data = ext.get(f"camera_{sn}")
         if cam_data is None:
@@ -123,7 +98,7 @@ def get_projection_matrices(cameras: list) -> list:
         R = np.array(cam_data['R'], dtype=np.float32)
         t = np.array(cam_data['t'], dtype=np.float32).reshape(3, 1)
         
-        P = _build_projection_matrix(K, R, t)
+        P = build_projection_matrix(K, R, t)
         proj_matrices.append(P)
     
     return proj_matrices
@@ -131,6 +106,7 @@ def get_projection_matrices(cameras: list) -> list:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main():
+    """Start the YOLO pose estimation loop and stream 3D points over OSC to Unity."""
     parser = argparse.ArgumentParser(description="Stream YOLO poses to Unity via OSC.")
     parser.add_argument("--mode", type=str, choices=["barycenter", "anchors"], required=True,
                         help="Calibration mode: barycenter or anchors")

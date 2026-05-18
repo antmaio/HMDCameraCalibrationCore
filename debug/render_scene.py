@@ -214,11 +214,14 @@ def main() -> None:
             hmd_ext = json.load(f)
             
         for k, v in hmd_ext.items():
+            if k == "left_eye" or k == "xr_camera":
+                continue
             R_mat = np.array(v['R'])
             t = np.array(v['t']).reshape(3)
             R_world = R_mat.T
             pos_world = -R_world @ t
             draw_axes(view, pos_world, R_world, label_text=f"Calibrated {k}", scale=0.6, width=2)
+            
             print(f"[INFO] Rendered Calibrated {k}")
 
     print("\n[INFO] Scene rendered successfully. Close the window to exit.")

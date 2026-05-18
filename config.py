@@ -25,7 +25,7 @@ SQUARE_SIZE:float = 0.25  # Size of a square in meters
 # OSC / Unity Settings
 # ------------------------------------------------------------------
 
-HMD_OSC_IP: str = "10.104.202.43"
+HMD_OSC_IP: str = "10.104.202.34"
 SEND_OSC_PORT: int = 5005
 LISTEN_OSC_PORT: int = 5010
 OSC_TARGET_HZ: float = 60.0
@@ -34,7 +34,7 @@ OSC_TARGET_HZ: float = 60.0
 # YOLO Settings
 # ------------------------------------------------------------------
 
-YOLO_WEIGHTS: str   = "yolov8n-pose"
+YOLO_WEIGHTS: str   = "yolov8x-pose-p6"
 USE_ONNX: bool      = False  # Set to True if you have an ONNX export of the model for faster inference on some platforms
 #COCO keypoint indices:
 # 0: Nose

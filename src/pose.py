@@ -3,7 +3,7 @@ pose.py
 Handles YOLOv8 pose estimation on batched camera frames.
 """
 
-from networkx import config
+import config
 import numpy as np
 from ultralytics import YOLO
 import torch

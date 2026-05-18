@@ -26,7 +26,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 from src.camera import init_cameras, grab_frames, close_cameras
-from src.triangulation import _build_projection_matrix, _dlt_triangulate_point
+from src.triangulation import build_projection_matrix, _dlt_triangulate_point
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Unity OSC Receiver
@@ -197,7 +197,7 @@ def get_projection_matrices(cameras: list) -> list:
         R = np.array(cam_data['R'], dtype=np.float32)
         t = np.array(cam_data['t'], dtype=np.float32).reshape(3, 1)
         
-        P = _build_projection_matrix(K, R, t)
+        P = build_projection_matrix(K, R, t)
         proj_matrices.append(P)
     
     return proj_matrices
@@ -345,9 +345,9 @@ def main() -> None:
     
     # Unity-space corners (visualized in same scene for comparison)
     # We use a slightly smaller size and different appearance (e.g. outline or transparency)
-    scatter_unity = gl.GLScatterPlotItem(pos=np.zeros((4, 3), dtype=np.float32), color=scatter_colors, size=10)
-    scatter_unity.setVisible(False)
-    view.addItem(scatter_unity)
+    # scatter_unity = gl.GLScatterPlotItem(pos=np.zeros((4, 3), dtype=np.float32), color=scatter_colors, size=10)
+    # scatter_unity.setVisible(False)
+    # view.addItem(scatter_unity)
     
     print("[INFO] Stream running. Press 'c' to capture & send, 'q' to quit.")
     
@@ -548,8 +548,8 @@ def main() -> None:
                 # Unity(x, y, z) -> PyQtGraph(x, z, y) usually, 
                 # but let's just apply the conversion to see them in the Unity-relative grid
                 corners_unity_pg = OpenCV2PyQtGraphAxisSystem(corners_unity) 
-                scatter_unity.setData(pos=corners_unity_pg)
-                scatter_unity.setVisible(True)
+                # scatter_unity.setData(pos=corners_unity_pg)
+                # scatter_unity.setVisible(True)
 
                 # Geometric checks for the rectangle
                 tl, tr, bl, br = corners_world[0], corners_world[1], corners_world[2], corners_world[3]
