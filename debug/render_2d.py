@@ -237,7 +237,7 @@ def main() -> None:
         hmd_world_pts = get_hmd_points_in_world(args.mode)
     
     print("[DEBUG] Loading YOLO model...")
-    model = load_model(config.YOLO_WEIGHTS, config.USE_ONNX)
+    model = load_model(config.YOLO_WEIGHTS, config.YOLO_FORMAT)
     
     window_names = []
     save_dirs = []

@@ -1,6 +1,7 @@
 # Models
 *.pt
 *.onnx
+*.engine 
 
 # Data, texts and images
 *.txt
@@ -19,3 +20,6 @@ __pycache__/
 # Unused and deprecated scripts (escaping brackets)
 \[UNUSED\]_*.py
 \[DEPRECATED\]_*.py
+compare_model_keys.py
+prune_yolov8_pose_p6.py
+export.py

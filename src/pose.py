@@ -15,21 +15,32 @@ import config
 NUM_KEYPOINTS = 17
 
 
-def load_model(weights: str = "yolov8n-pose", use_onnx=False) -> YOLO:
+def load_model(weights: str = "yolov8n-pose", yolo_format: str | bool = "pt") -> YOLO:
     """
     Load a YOLOv8 pose model.
 
     Args:
-        weights: Path to model weights file (.pt or .engine for TensorRT).
-        use_onnx: Whether to use ONNX format.
+        weights: Path to model weights file without extension.
+        yolo_format: Model format, one of 'pt', 'onnx', or 'engine'.
+                     For backwards compatibility, a boolean is accepted
+                     where True is treated as 'onnx'.
 
     Returns:
         Loaded YOLO model instance.
     """
-    weights = weights + '.pt' if not use_onnx else weights + '.onnx'
-        
+    if isinstance(yolo_format, bool):
+        yolo_format = "onnx" if yolo_format else "pt"
+    yolo_format = str(yolo_format).lower()
+    if yolo_format not in ("pt", "onnx", "engine"):
+        raise ValueError(
+            "yolo_format must be one of 'pt', 'onnx', or 'engine'"
+        )
+
+    weights = f"{weights}.{yolo_format}"
     print(f"[YOLO] Loading model from '{weights}'...")
     model = YOLO(weights)
+    if yolo_format == "pt":
+        model = model.to('cuda' if torch.cuda.is_available() else 'cpu')
     print("[YOLO] Model ready.")
     return model
 
@@ -124,7 +135,7 @@ def estimate_poses(model: YOLO, frames_batch: torch.Tensor|list[np.ndarray]|np.n
         B = frames_batch.shape[0]
 
         # ── Replicate YOLO's internal preprocess ────────────────────────
-        preprocessed = _letterbox_batch(frames_batch)  # (B, 3, pH, pW) float32 if 
+        preprocessed = _letterbox_batch(frames_batch, target=config.IMAGE_TARGET_SIZE)  # (B, 3, pH, pW) float32 if 
         # ── Forward pass — bypass YOLO's own preprocess ─────────────────
         # Passing an already-normalized BCHW float tensor skips the internal
         # letterbox so YOLO won't double-process the input.
@@ -140,7 +151,7 @@ def estimate_poses(model: YOLO, frames_batch: torch.Tensor|list[np.ndarray]|np.n
                 kpts = result.keypoints.xy[0].cpu().numpy()  # (17, 2) in letterboxed space
 
                 # ── Invert letterbox scale to get original pixel coords ──
-                scale = min(640 / frames_batch.shape[1], 640 / frames_batch.shape[2])
+                scale = min(config.IMAGE_TARGET_SIZE / frames_batch.shape[1], config.IMAGE_TARGET_SIZE / frames_batch.shape[2])
                 kpts = kpts / scale
 
                 poses.append(kpts.astype(np.float32))

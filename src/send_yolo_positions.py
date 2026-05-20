@@ -149,7 +149,7 @@ def main():
     executor = ThreadPoolExecutor(max_workers=len(cameras))
 
     # Load YOLO
-    yolo_model = load_model(config.YOLO_WEIGHTS, config.USE_ONNX)
+    yolo_model = load_model(config.YOLO_WEIGHTS, config.YOLO_FORMAT)
 
     # Init OSC Sender
     sender = OscSenderSleepBasedRateLimiter(ip=config.HMD_OSC_IP, port=config.SEND_OSC_PORT, target_hz=60.0)

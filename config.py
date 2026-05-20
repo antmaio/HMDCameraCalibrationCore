@@ -34,8 +34,22 @@ OSC_TARGET_HZ: float = 60.0
 # YOLO Settings
 # ------------------------------------------------------------------
 
-YOLO_WEIGHTS: str   = "yolov8x-pose-p6"
-USE_ONNX: bool      = False  # Set to True if you have an ONNX export of the model for faster inference on some platforms
+YOLO_WEIGHTS: str = "yolov8x-pose-p6-pruned-ratio020"  # Path to your YOLO pose model weights
+YOLO_FORMAT: str = "engine"  # Choose one of: 'pt', 'onnx', or 'engine'
+IMAGE_TARGET_SIZE: int = 640  # Image target size after resize (letterbox)
+
+def valid_format(YOLO_FORMAT: str) -> tuple[bool, bool]:
+    yolo_format_choices: tuple[str, ...] = ("pt", "onnx", "engine")
+    if YOLO_FORMAT.lower() not in yolo_format_choices:
+        raise ValueError(
+            f"YOLO_FORMAT must be one of {yolo_format_choices}; got {YOLO_FORMAT!r}"
+        )
+    use_onnx: bool = YOLO_FORMAT == "onnx"
+    use_engine: bool = YOLO_FORMAT == "engine"
+    return use_onnx, use_engine
+
+USE_ONNX, USE_ENGINE = valid_format(YOLO_FORMAT)
+
 #COCO keypoint indices:
 # 0: Nose
 # 1: Left Eye
@@ -78,3 +92,4 @@ EXTRINSICS: list[dict] = [
     {"R": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "t": [1.5, 0.0, 0.0]},   # Camera 1 — REPLACE
     {"R": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "t": [-1.5, 0.0, 0.0]},  # Camera 2 — REPLACE
 ]
+

@@ -319,7 +319,7 @@ def main() -> None:
     executor = ThreadPoolExecutor(max_workers=len(cameras))
     
     print("[INFO] Loading YOLO model...")
-    model = load_model(config.YOLO_WEIGHTS, config.USE_ONNX) 
+    model = load_model(config.YOLO_WEIGHTS, config.YOLO_FORMAT) 
     
         # ── PyQtGraph scene ───────────────────────────────────────────────
     # Setup PyQtGraph 3D plot
