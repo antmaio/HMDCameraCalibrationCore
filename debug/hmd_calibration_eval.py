@@ -66,6 +66,8 @@ def main():
     objp = np.zeros((w * h, 3), np.float32)
     objp[:, :2] = np.mgrid[0:w, 0:h].T.reshape(-1, 2) * sq_size
 
+    allowed_spaces = ["trackingSpace", "guardianSpace", "anchorSpace", "sceneSpace_LongestWall"]
+    expected_scene_space_name = "sceneSpace_LongestWall"
     global_target_spaces = set(["trackingSpace", "guardianSpace", "anchorSpace"])
 
     # Load all valid snapshots
@@ -113,7 +115,8 @@ def main():
         if data.get("hasSceneSpaces", False) and "sceneSpaces" in data:
             for scene_space in data["sceneSpaces"]:
                 anchor_name = f"sceneSpace_{scene_space['anchorName']}"
-                global_target_spaces.add(anchor_name)
+                if anchor_name != expected_scene_space_name:
+                    continue
                 sp_data = scene_space.get("poseData", {})
                 if "left_camera_position" in sp_data and "left_camera_rotation" in sp_data:
                     pos = sp_data["left_camera_position"]
@@ -122,6 +125,7 @@ def main():
                     rot_u = np.array([rot["x"], rot["y"], rot["z"], rot["w"]])
                     pos_cv, R_cv = unity_to_cv(pos_u, rot_u)
                     space_transforms[anchor_name] = {"R_c2s": R_cv, "t_c2s": pos_cv}
+                    global_target_spaces.add(anchor_name)
 
         # Camera intrinsics
         fx = data["focalLength"]["x"]
@@ -155,9 +159,11 @@ def main():
 
     print(f"[INFO] Loaded {len(snapshots)} valid snapshots.")
 
-    target_spaces = sorted(list(global_target_spaces))
+    target_spaces = [sp for sp in allowed_spaces if sp in global_target_spaces]
     results_by_space = {sp: [] for sp in target_spaces}
     results_3d_by_space = {sp: [] for sp in target_spaces}
+    all_errors_by_space = {sp: [] for sp in target_spaces}
+    all_3d_errors_by_space = {sp: [] for sp in target_spaces}
 
     # Round robin
     for i, ref_snap in enumerate(snapshots):
@@ -168,10 +174,13 @@ def main():
         
         errors_for_ref = {sp: [] for sp in target_spaces}
         errors_3d_for_ref = {sp: [] for sp in target_spaces}
+        stds_for_ref = {sp: [] for sp in target_spaces}
+        stds_3d_for_ref = {sp: [] for sp in target_spaces}
         
         for space in target_spaces:
             ref_tx = ref_snap["space_transforms"].get(space)
-            if not ref_tx: continue
+            if not ref_tx:
+                continue
             
             # Transform board corners from Local Board space -> Ref Camera Space -> Target Space
             corners_3d_space = []
@@ -184,10 +193,12 @@ def main():
 
             # Test against all other snapshots
             for j, test_snap in enumerate(snapshots):
-                if i == j: continue
+                if i == j:
+                    continue
                 
                 test_tx = test_snap["space_transforms"].get(space)
-                if not test_tx: continue
+                if not test_tx:
+                    continue
                 
                 # 3D points in target space according to test snapshot
                 test_corners_3d_space = []
@@ -199,7 +210,7 @@ def main():
                 
                 # Compute 3D error in cm (assuming Unity units are meters)
                 dist_3d = np.linalg.norm(corners_3d_space - test_corners_3d_space, axis=1) * 100
-                errors_3d_for_ref[space].append(np.mean(dist_3d))
+                all_3d_errors_by_space[space].extend(dist_3d.tolist())
 
                 R_s2c = test_tx["R_c2s"].T
                 t_s2c = -R_s2c @ test_tx["t_c2s"]
@@ -225,7 +236,16 @@ def main():
                         cv2.line(display_img, (int(orig_2d[0]), int(orig_2d[1])), proj_2d, (0, 255, 255), 1)
 
                 if errs:
-                    errors_for_ref[space].append(np.mean(errs))
+                    mean_err = np.mean(errs)
+                    std_err = np.std(errs)
+                    mean_3d = np.mean(dist_3d)
+                    std_3d = np.std(dist_3d)
+
+                    errors_for_ref[space].append(mean_err)
+                    stds_for_ref[space].append(std_err)
+                    errors_3d_for_ref[space].append(mean_3d)
+                    stds_3d_for_ref[space].append(std_3d)
+                    all_errors_by_space[space].extend(errs)
                     
                     # Save visual debug image
                     ref_name = os.path.basename(ref_snap['json_path']).replace(".json", "")
@@ -239,26 +259,38 @@ def main():
         for space in target_spaces:
             if errors_for_ref[space]:
                 overall_mean = np.mean(errors_for_ref[space])
+                overall_std = np.std(all_errors_by_space[space]) if all_errors_by_space[space] else 0.0
                 overall_mean_3d = np.mean(errors_3d_for_ref[space])
-                print(f"  [{space}] => Mean reprojection error: {overall_mean:.2f} px | Mean 3D error: {overall_mean_3d:.2f} cm")
+                overall_std_3d = np.std(all_3d_errors_by_space[space]) if all_3d_errors_by_space[space] else 0.0
+                print(f"  [{space}] => Mean reprojection error: {overall_mean:.2f} px  std={overall_std:.2f} px | Mean 3D error: {overall_mean_3d:.2f} cm  std={overall_std_3d:.2f} cm")
                 results_by_space[space].append({
                     "reference": os.path.basename(ref_snap["json_path"]),
-                    "mean_error": overall_mean
+                    "mean_error": overall_mean,
+                    "std_error": np.mean(stds_for_ref[space]) if stds_for_ref[space] else 0.0,
                 })
                 results_3d_by_space[space].append({
                     "reference": os.path.basename(ref_snap["json_path"]),
-                    "mean_error_3d": overall_mean_3d
+                    "mean_error_3d": overall_mean_3d,
+                    "std_error_3d": np.mean(stds_3d_for_ref[space]) if stds_3d_for_ref[space] else 0.0,
                 })
 
     print("\n[SUMMARY]")
+    summary_lines = []
     for space in target_spaces:
         if results_by_space[space]:
             total_mean = np.mean([r["mean_error"] for r in results_by_space[space]])
+            total_std = np.std(all_errors_by_space[space]) if all_errors_by_space[space] else 0.0
             total_mean_3d = np.mean([r["mean_error_3d"] for r in results_3d_by_space[space]])
-            print(f"  Overall {space} Cross-Reprojection Mean Error: {total_mean:.2f} px | 3D Error: {total_mean_3d:.2f} cm")
-            
+            total_std_3d = np.std(all_3d_errors_by_space[space]) if all_3d_errors_by_space[space] else 0.0
+            line = (f"  Overall {space} Cross-Reprojection Mean Error: {total_mean:.2f} px ± {total_std:.2f} px | "
+                    f"3D Error: {total_mean_3d:.2f} cm ± {total_std_3d:.2f} cm")
+            print(line)
+            summary_lines.append(line)
+
     # Plotting
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12))
+    plt.style.use("seaborn-v0_8")
+    plt.rcParams.update({"font.size": 14})
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 14), sharex=True)
     
     all_refs = []
     for space in target_spaces:
@@ -267,7 +299,7 @@ def main():
                 all_refs.append(r["reference"])
                 
     x = np.arange(len(all_refs))
-    width = 0.8 / len(target_spaces)
+    width = 0.75 / max(len(target_spaces), 1)
     
     def get_means(sp, results_dict, key):
         means = []
@@ -276,38 +308,61 @@ def main():
             means.append(val)
         return means
 
-    colors_pool = ['skyblue', 'lightgreen', 'salmon', 'plum', 'khaki', 'coral', 'tan', 'gold', 'cyan', 'lavender']
+    palette = ['#5B8CC8', '#7FBF7F', '#F59899', '#C27BA0']
+    legend_handles = []
     for idx, space in enumerate(target_spaces):
         means_2d = get_means(space, results_by_space, "mean_error")
         means_3d = get_means(space, results_3d_by_space, "mean_error_3d")
-        color = colors_pool[idx % len(colors_pool)]
+        color = palette[idx % len(palette)]
         offset = (idx - len(target_spaces) / 2.0 + 0.5) * width
         
-        ax1.bar(x + offset, means_2d, width, label=space, color=color, edgecolor='black')
-        ax2.bar(x + offset, means_3d, width, label=space, color=color, edgecolor='black')
+        bars_2d = ax1.bar(x + offset, means_2d, width, color=color, edgecolor='black')
+        bars_3d = ax2.bar(x + offset, means_3d, width, color=color, edgecolor='black')
+        legend_handles.append(bars_2d)
         
+        ax1.bar_label(bars_2d, fmt='%.2f', padding=3, fontsize=12)
+        ax2.bar_label(bars_3d, fmt='%.2f', padding=3, fontsize=12)
+
     clean_refs = [ref.replace("Snapshot_", "").replace(".json", "") for ref in all_refs]
     
-    ax1.set_ylabel("Mean Reprojection Error (pixels)")
-    ax1.set_title("PnP Cross-Reprojection Error Comparison by Coordinate Space")
+    ax1.set_ylabel("Mean Reprojection Error (pixels)", fontsize=16)
+    ax1.set_title("PnP Cross-Reprojection Error Comparison by Coordinate Space", fontsize=18)
     ax1.set_xticks(x)
-    ax1.set_xticklabels(clean_refs, rotation=45, ha='right')
-    ax1.legend()
+    ax1.tick_params(axis='x', labelbottom=False)
+    ax1.tick_params(axis='y', labelsize=14)
     ax1.grid(axis='y', linestyle='--', alpha=0.7)
     
-    ax2.set_ylabel("Mean 3D Error (cm)")
-    ax2.set_xlabel("Reference Snapshot")
-    ax2.set_title("PnP 3D Position Error Comparison by Coordinate Space (in cm)")
+    ax2.set_ylabel("Mean 3D Error (cm)", fontsize=16)
+    ax2.set_xlabel("Reference Snapshot", fontsize=16)
+    ax2.set_title("PnP 3D Position Error Comparison by Coordinate Space", fontsize=18)
     ax2.set_xticks(x)
-    ax2.set_xticklabels(clean_refs, rotation=45, ha='right')
-    ax2.legend()
+    ax2.set_xticklabels(clean_refs, rotation=45, ha='right', fontsize=14)
+    ax2.tick_params(axis='y', labelsize=14)
     ax2.grid(axis='y', linestyle='--', alpha=0.7)
+
+    fig.legend(legend_handles, target_spaces, title='Coordinate Space', loc='upper center', ncol=min(len(target_spaces), 4), fontsize=14, title_fontsize=14)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
     
-    plt.tight_layout()
-    
-    plot_path = os.path.join(folder_path, "PnP_Evaluation", "pnp_cross_reprojection_report.png")
-    plt.savefig(plot_path)
+    out_folder = os.path.join(folder_path, "PnP_Evaluation")
+    os.makedirs(out_folder, exist_ok=True)
+    plot_path = os.path.join(out_folder, "pnp_cross_reprojection_report.png")
+    plt.savefig(plot_path, dpi=200)
+
+    report_path = os.path.join(out_folder, "pnp_cross_reprojection_report.txt")
+    with open(report_path, "w") as report_file:
+        report_file.write("PNP CROSS-REPROJECTION REPORT\n")
+        report_file.write("===========================\n")
+        report_file.write("\n".join(summary_lines))
+        report_file.write("\n\nPer-reference mean values:\n")
+        for space in target_spaces:
+            report_file.write(f"\n{space}:\n")
+            for r in results_by_space[space]:
+                report_file.write(f"  {r['reference']}: {r['mean_error']:.2f} px (avg per-ref std {r['std_error']:.2f} px)\n")
+            report_file.write(f"\n{space} 3D means:\n")
+            for r in results_3d_by_space[space]:
+                report_file.write(f"  {r['reference']}: {r['mean_error_3d']:.2f} cm (avg per-ref std {r['std_error_3d']:.2f} cm)\n")
     print(f"[INFO] Plot saved to {plot_path}")
+    print(f"[INFO] Numeric report saved to {report_path}")
 
 if __name__ == "__main__":
     main()
