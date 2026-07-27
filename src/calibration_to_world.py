@@ -1,5 +1,100 @@
-"""calibration_to_world.py
-Perform ZED camera calibration to a shared checkerboard world origin and save extrinsics.
+"""
+src.calibration_to_world — Multi-Camera Extrinsic Calibration
+==============================================================
+
+Performs absolute multi-camera calibration to a shared checkerboard world origin.
+
+This script computes camera extrinsics (rotation and translation) relative to a
+fixed checkerboard pattern, establishing a common world coordinate frame for all cameras.
+The calibration enables triangulation of 2D observations into consistent 3D coordinates.
+
+Key Features:
+  - Detects checkerboard pattern in synchronized frames from all cameras
+  - Computes world-to-camera extrinsics (pose relative to checkerboard origin)
+  - Computes camera pose in world frame (physical location)
+  - Refines corner detection for sub-pixel accuracy
+  - Saves calibration data to JSON for use in triangulation
+  - Optional visualization of detected corners
+
+Command-Line Arguments:
+  --display     Show checkerboard detection results before/after calibration
+  --out_dir     Directory to save calibration results (default: calibration_results)
+
+Usage:
+  # Basic calibration
+  python -m src.calibration_to_world
+  
+  # With visualization
+  python -m src.calibration_to_world --display
+  
+  # Custom output directory
+  python -m src.calibration_to_world --out_dir my_calib
+
+Calibration Workflow:
+  1. Initialize all ZED cameras
+  2. Extract intrinsic parameters (focal length, principal point, distortion)
+  3. Generate 3D checkerboard points on Z=0 plane (world origin)
+  4. Grab synchronized frames from all cameras
+  5. Detect 2D checkerboard corners in each camera image
+  6. Refine corners to sub-pixel accuracy
+  7. Solve PnP: estimate world-to-camera extrinsics
+  8. Invert to get camera-in-world poses
+  9. Save both transforms to JSON
+
+Output Files:
+  - calibration_results/world_to_camera_extrinsics.json
+    Camera extrinsics for projection matrix P = K @ [R|t]
+    Transforms points from world to camera image plane
+    
+  - calibration_results/camera_poses_in_world.json
+    Camera poses in world frame (where cameras are physically located)
+    Useful for visualization and understanding camera positions
+
+JSON Format:
+  world_to_camera_extrinsics.json:
+  {
+    "camera_<SERIAL>": {"R": [[...]], "t": [...]},
+    ...
+  }
+  
+  camera_poses_in_world.json:
+  {
+    "camera_<SERIAL>": {"R": [[...]], "t": [...]},
+    ...
+  }
+
+Calibration Requirements:
+  - Checkerboard pattern visible in all camera views
+  - Checkerboard completely within frame (not cut off)
+  - Good lighting for corner detection
+  - Cameras synchronized (time-aligned frames)
+  - Board size and square size configured in config.py
+
+Configuration (config.py):
+  - CAMERA_SERIAL_NUMBERS: List of camera serial numbers to calibrate
+  - CAMERA_FPS: Acquisition frame rate
+  - CALIBRATION_BOARD_SIZE: (height, width) of checkerboard in corners
+  - SQUARE_SIZE: Physical size of checkerboard squares (mm or same units as world)
+
+Dependencies:
+  - core.camera (frame grabbing)
+  - utils.utils_transform (compute_camera_pose_in_world)
+  - utils.utils_json (save_json)
+  - utils.utils_calibration (generate_3d_checkerboard_points)
+  - cv2 (checkerboard detection, PnP solving)
+  - numpy
+  - pyzed (ZED SDK)
+
+Notes:
+  - Corner detection uses CALIB_CB_ADAPTIVE_THRESH for robustness
+  - Corner refinement uses cv2.cornerSubPix for accuracy
+  - All distortion coefficients from ZED camera models are used
+  - Script exits gracefully if checkerboard not detected in any camera
+  - Generated world frame origin at checkerboard pattern location
+
+Next Steps After Calibration:
+  1. Run hmd_calibration_to_world.py for HMD calibration
+  2. Use world-to-camera extrinsics in send_yolo_positions.py for triangulation
 """
 
 # External
@@ -10,10 +105,14 @@ import os
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 
-# Internal
+#core
+from core.camera import init_cameras, grab_frames, close_cameras
+#utlis
+from utils.utils_transform import compute_camera_pose_in_world 
+from utils.utils_json import ensure_dir, save_json
+from utils.utils_calibration import  generate_3d_checkerboard_points
+#config
 import config
-from src.camera import init_cameras, grab_frames, close_cameras
-from utils import compute_camera_pose_in_world, ensure_dir, generate_3d_checkerboard_points, save_json
 
 def main():
     """Perform ZED camera extrinsic calibration and save world and camera poses."""
@@ -33,6 +132,7 @@ def main():
     # ------------------------------------------------------------------
     # 2. Collect intrinsics from cameras
     # ------------------------------------------------------------------
+
     intrinsics_list, disto_list = [], []
     for cam in cameras:
         cam_info = cam.get_camera_information()

@@ -1,12 +1,43 @@
 """
-osc_sender.py
-Handles the 60 Hz OSC broadcast thread to Unity (or any OSC receiver).
+core.osc — OSC Pose Streaming
+================================
+
+Handles background thread-based Open Sound Control (OSC) broadcasting of 3D pose data.
+
+This module provides a timer-based OSC sender for streaming 3D keypoint data to external
+receivers (e.g., Unity) at a fixed target frequency while maintaining thread-safe updates.
+
+Key Features:
+  - Background daemon thread that broadcasts pose data at a fixed frequency (default 60 Hz)
+  - Thread-safe pose updates via lock-protected slot
+  - Strict timing using sleep-based rate limiting to maintain target frequency
+  - Repeats last known pose if no new data is provided (useful for receivers expecting constant stream)
+  - Flattens (17, 3) pose arrays into 51-element OSC messages
+
+Classes:
+  OscSenderSleepBasedRateLimiter: Main sender with continuous broadcast behavior
+  
+Usage:
+  sender = OscSenderSleepBasedRateLimiter(ip='127.0.0.1', port=5005, target_hz=60)
+  sender.start()
+  # In main loop:
+  sender.update(pose_3d)  # (17, 3) numpy array
+  # Cleanup:
+  sender.stop()
+
+Dependencies:
+  - pythonosc (for UDP client)
+  - numpy
+  - threading
+
+Notes:
+  - OSC address: /yolo/pose3d
+  - Pose format: [x0, y0, z0, x1, y1, z1, ..., x16, y16, z16]
+  - Thread-safe for concurrent updates from main inference loop
 """
 
 import threading
 import time
-import socket
-import struct
 import numpy as np
 from pythonosc.udp_client import SimpleUDPClient
 
@@ -83,6 +114,7 @@ class OscSenderSleepBasedRateLimiter:
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
+'''
 class OscSenderLatestOnlySlot:
     """
     Slot-based background thread that broadcasts 3D pose data over OSC.
@@ -148,3 +180,4 @@ class OscSenderLatestOnlySlot:
         tags += b"\x00" * ((-len(tags)) % 4)
         data = struct.pack(f">{n}f", *floats)
         return addr + tags + data
+'''

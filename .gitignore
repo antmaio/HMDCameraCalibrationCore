@@ -6,12 +6,23 @@
 # Data, texts and images
 *.txt
 *.png
+*.json
+*.jpg
+*.mp4
+
+#Misc
+*.bat
 
 # Folders
 /frames/
 /screenshot_for_report/
 /snapshot/
 /calibration_results/
+/yolo_model/
+/profiling/
+/recordings/
+/debug/
+/runs/
 
 # Editor & Python cache
 .vscode/
@@ -22,4 +33,7 @@ __pycache__/
 \[DEPRECATED\]_*.py
 compare_model_keys.py
 prune_yolov8_pose_p6.py
+prune_yolov8_pose.py
 export.py
+evaluate_yolo_on_coco.py
+_send_yolo_positions.py
